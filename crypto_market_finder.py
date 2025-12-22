@@ -11,7 +11,7 @@ from api_client import PolymarketAPIClient
 from config import (
     CRYPTO_KEYWORDS, MARKET_FETCH_BATCH_SIZE,
     MAX_DISPLAY_RESOLVED, MAX_DISPLAY_UNRESOLVED,
-    CACHE_FILE
+    CACHE_FILE, DEFAULT_MAX_MARKETS
 )
 
 
@@ -21,32 +21,89 @@ def is_crypto_market(question: str, keywords: List[str]) -> bool:
     return any(keyword.lower() in question_lower for keyword in keywords)
 
 
-def fetch_all_markets(client: PolymarketAPIClient, closed: bool = None) -> List[Dict]:
-    """Fetch all markets with pagination"""
+def fetch_all_markets(client: PolymarketAPIClient, closed: bool = None,
+                     max_markets: int = DEFAULT_MAX_MARKETS,
+                     start_date: str = None, end_date: str = None,
+                     newest_first: bool = True) -> List[Dict]:
+    """
+    Fetch markets with pagination and optional date filtering
+
+    Args:
+        client: API client
+        closed: Filter by closed status (None for all)
+        max_markets: Maximum number of markets to fetch
+        start_date: Only include markets created on or after this date (YYYY-MM-DD)
+        end_date: Only include markets created before this date (YYYY-MM-DD)
+        newest_first: Fetch newest markets first (default: True)
+    """
     all_markets = []
     offset = 0
     batch_size = MARKET_FETCH_BATCH_SIZE
 
     print(f"\nFetching markets from Polymarket...")
+    if start_date:
+        print(f"  Filtering markets created on or after: {start_date}")
+    if end_date:
+        print(f"  Filtering markets created before: {end_date}")
 
-    while True:
+    # Convert dates to ISO format for comparison if provided
+    from datetime import datetime
+    start_dt = datetime.fromisoformat(start_date) if start_date else None
+    end_dt = datetime.fromisoformat(end_date) if end_date else None
+
+    while len(all_markets) < max_markets:
         print(f"  Fetching batch at offset {offset}...")
         markets = client.get_markets(
             limit=batch_size,
             offset=offset,
             closed=closed,
             order="createdAt",
-            ascending=True
+            ascending=not newest_first  # Invert for API (ascending=True means oldest first)
         )
 
         if not markets:
             break
 
-        all_markets.extend(markets)
+        # Apply date filtering if specified
+        filtered_markets = []
+        for market in markets:
+            created_at = market.get('createdAt', '')
+            if not created_at:
+                continue
+
+            market_dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+
+            # Check date bounds
+            if start_dt and market_dt < start_dt:
+                if newest_first:
+                    # We've gone past the start date, stop fetching
+                    print(f"  Reached markets before {start_date}, stopping...")
+                    return all_markets
+                else:
+                    # Skip this market, continue to next
+                    continue
+
+            if end_dt and market_dt >= end_dt:
+                if not newest_first:
+                    # We've gone past the end date, stop fetching
+                    print(f"  Reached markets after {end_date}, stopping...")
+                    return all_markets
+                else:
+                    # Skip this market, continue to next
+                    continue
+
+            filtered_markets.append(market)
+
+        all_markets.extend(filtered_markets)
         offset += len(markets)
 
+        # Check if we've reached the end of available markets
         if len(markets) < batch_size:
             break  # Last page
+
+    if len(all_markets) >= max_markets:
+        print(f"  Reached maximum market limit ({max_markets})")
+        all_markets = all_markets[:max_markets]
 
     print(f"✓ Fetched {len(all_markets)} total markets\n")
     return all_markets
@@ -211,6 +268,14 @@ def main():
                        help=f'Output CSV file (default: {CACHE_FILE})')
     parser.add_argument('--short-term', action='store_true',
                        help='Show only short-term markets (Up or Down, hourly, etc.)')
+    parser.add_argument('--start-date', type=str, default=None,
+                       help='Only include markets created on or after this date (YYYY-MM-DD)')
+    parser.add_argument('--end-date', type=str, default=None,
+                       help='Only include markets created before this date (YYYY-MM-DD)')
+    parser.add_argument('--max-markets', type=int, default=DEFAULT_MAX_MARKETS,
+                       help=f'Maximum number of markets to fetch (default: {DEFAULT_MAX_MARKETS})')
+    parser.add_argument('--oldest-first', action='store_true',
+                       help='Fetch oldest markets first (default: newest first)')
 
     args = parser.parse_args()
 
@@ -227,15 +292,30 @@ def main():
 
     # Fetch markets based on user filter
     all_markets = []
+    newest_first = not args.oldest_first
 
     if args.resolved or args.all:
         print("Fetching CLOSED markets...")
-        closed_markets = fetch_all_markets(client, closed=True)
+        closed_markets = fetch_all_markets(
+            client,
+            closed=True,
+            max_markets=args.max_markets,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            newest_first=newest_first
+        )
         all_markets.extend(closed_markets)
 
     if args.unresolved or args.all:
         print("Fetching OPEN markets...")
-        open_markets = fetch_all_markets(client, closed=False)
+        open_markets = fetch_all_markets(
+            client,
+            closed=False,
+            max_markets=args.max_markets,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            newest_first=newest_first
+        )
         all_markets.extend(open_markets)
 
     print(f"\n✓ Total markets fetched: {len(all_markets)}")

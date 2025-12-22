@@ -26,9 +26,10 @@ CRYPTO_KEYWORDS = [
 ]
 
 # Market Finder Settings
-MARKET_FETCH_BATCH_SIZE = 1000
+MARKET_FETCH_BATCH_SIZE = 500  # API hard limit is 500 per request
 MAX_DISPLAY_RESOLVED = 20
 MAX_DISPLAY_UNRESOLVED = 20
+DEFAULT_MAX_MARKETS = 5000  # Default max markets to fetch (prevents infinite loops)
 
 # Live Monitor Settings
 DEFAULT_POLL_INTERVAL = 5  # seconds
