@@ -91,6 +91,27 @@ class PolymarketAPIClient:
         data = self._request_with_retry(url, params)
         return data if isinstance(data, list) else []
 
+    def get_market_by_id(self, market_id: str) -> Optional[Dict]:
+        """
+        Fetch a single market by ID from Gamma API
+
+        Args:
+            market_id: Market ID (e.g., "995839")
+
+        Returns:
+            Market dictionary or None if not found
+        """
+        url = f"{GAMMA_API_BASE}/markets"
+        params = {"id": market_id}
+
+        data = self._request_with_retry(url, params)
+
+        # API returns a list with one item
+        if isinstance(data, list) and len(data) > 0:
+            return data[0]
+
+        return None
+
     def get_events(self, closed: bool = False, limit: int = 100) -> List[Dict]:
         """
         Fetch events from Gamma API
@@ -110,18 +131,19 @@ class PolymarketAPIClient:
 
     # === CLOB API Methods ===
 
-    def get_price(self, token_id: str) -> Optional[Dict]:
+    def get_price(self, token_id: str, side: str = "buy") -> Optional[Dict]:
         """
         Get current price for a token
 
         Args:
             token_id: Token ID to fetch price for
+            side: Order side - "buy" or "sell" (default: "buy")
 
         Returns:
             Price dictionary or None if unavailable
         """
         url = f"{CLOB_API_BASE}/price"
-        params = {"token_id": token_id}
+        params = {"token_id": token_id, "side": side}
 
         return self._request_with_retry(url, params)
 

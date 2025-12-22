@@ -387,7 +387,10 @@ def main():
 
     # Show usage tip
     print()
-    print("💡 To monitor a market live, copy the token IDs and run:")
+    print("💡 To monitor a market live, use the Market ID:")
+    print("   python live_monitor.py --market-id <MARKET_ID>")
+    print()
+    print("   Or copy the token IDs:")
     print("   python live_monitor.py --token-up <TOKEN1> --token-down <TOKEN2>")
     print("=" * 65)
 
