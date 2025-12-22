@@ -1,0 +1,14 @@
+[project]
+name = "polymarket"
+version = "0.2.0"
+description = "Crypto market finder and live monitor for Polymarket"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "requests>=2.31.0",
+    "pandas>=2.2.0",
+]
+
+[project.scripts]
+market-finder = "crypto_market_finder:main"
+live-monitor = "live_monitor:main"

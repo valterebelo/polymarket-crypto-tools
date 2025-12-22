@@ -1,0 +1,48 @@
+"""
+Shared configuration for Polymarket tools
+"""
+
+# API Endpoints
+GAMMA_API_BASE = "https://gamma-api.polymarket.com"
+CLOB_API_BASE = "https://clob.polymarket.com"
+
+# Rate Limiting
+RATE_LIMIT_DELAY = 0.5  # seconds between requests
+RATE_LIMIT_BACKOFF = [1, 2, 5, 10, 30]  # exponential backoff on 429 (seconds)
+
+# Retry Logic
+MAX_RETRIES = 3
+TIMEOUT_SECONDS = 30
+
+# Crypto Keywords for Filtering
+CRYPTO_KEYWORDS = [
+    'bitcoin', 'btc', 'ethereum', 'eth', 'solana', 'sol',
+    'xrp', 'ripple', 'cardano', 'ada', 'dogecoin', 'doge',
+    'crypto', 'cryptocurrency', 'blockchain', 'defi', 'nft',
+    'web3', 'binance', 'bnb', 'polygon', 'matic', 'avalanche',
+    'avax', 'polkadot', 'dot', 'chainlink', 'link', 'litecoin',
+    'ltc', 'stellar', 'xlm', 'tron', 'trx', 'shiba', 'shib',
+    'uniswap', 'uni', 'cosmos', 'atom', 'filecoin', 'fil'
+]
+
+# Market Finder Settings
+MARKET_FETCH_BATCH_SIZE = 1000
+MAX_DISPLAY_RESOLVED = 20
+MAX_DISPLAY_UNRESOLVED = 20
+
+# Live Monitor Settings
+DEFAULT_POLL_INTERVAL = 5  # seconds
+MIN_POLL_INTERVAL = 1
+MAX_POLL_INTERVAL = 60
+ORDERBOOK_DEPTH = 5  # Top N levels to display
+RECENT_TRADES_COUNT = 10
+
+# Data Paths
+DATA_DIR = "data"
+ARCHIVE_DIR = "archive"
+CACHE_FILE = f"{DATA_DIR}/crypto_markets_cache.csv"
+
+# Terminal Display Settings
+USE_COLOR = True
+CLEAR_SCREEN = True
+BOX_WIDTH = 65
