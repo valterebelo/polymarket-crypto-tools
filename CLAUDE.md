@@ -31,14 +31,26 @@ uv run live-monitor --help
 ### Find Crypto Markets
 
 ```bash
-# Find all crypto markets
+# Find all crypto markets (newest first by default)
 uv run python crypto_market_finder.py --all
 
 # Find only unresolved markets
 uv run python crypto_market_finder.py --unresolved
 
+# Find short-term "Up or Down" markets (15min, 1hr, 4hr)
+uv run python crypto_market_finder.py --unresolved --short-term
+
 # Filter by minimum volume
 uv run python crypto_market_finder.py --unresolved --min-volume 1000
+
+# Date range filtering (YYYY-MM-DD format)
+uv run python crypto_market_finder.py --start-date 2025-12-01 --end-date 2025-12-22
+
+# Fetch more markets (default: 5000, API returns 500 per request)
+uv run python crypto_market_finder.py --unresolved --max-markets 10000
+
+# Get oldest markets first instead of newest
+uv run python crypto_market_finder.py --oldest-first --max-markets 2000
 
 # Custom output file
 uv run python crypto_market_finder.py --output my_markets.csv
@@ -84,7 +96,12 @@ uv run python live_monitor.py --token-up <ID1> --token-down <ID2> --market-name 
 **config.py**: Centralized configuration
 - API endpoints (Gamma API, CLOB API)
 - Rate limiting parameters (0.5s delay, exponential backoff)
-- Crypto keywords for filtering
+- Crypto keywords for filtering (bitcoin, ethereum, solana, xrp, etc.)
+- Market finder settings:
+  - `MARKET_FETCH_BATCH_SIZE = 500` (API hard limit)
+  - `DEFAULT_MAX_MARKETS = 5000` (default max markets to fetch)
+  - `MAX_DISPLAY_RESOLVED = 20` (show top 20 resolved markets)
+  - `MAX_DISPLAY_UNRESOLVED = 20` (show top 20 unresolved markets)
 - Display settings (colors, box width, poll intervals)
 
 **api_client.py**: `PolymarketAPIClient` class
@@ -110,8 +127,11 @@ uv run python live_monitor.py --token-up <ID1> --token-down <ID2> --market-name 
 **Gamma API** (Market Metadata):
 - Base URL: `https://gamma-api.polymarket.com`
 - `/markets` endpoint with pagination (limit/offset)
-- Parameters: `order=createdAt`, `ascending=true`, `closed=true/false`
+- **API hard limit**: Maximum 500 markets per request (even if limit=1000)
+- Parameters: `order=createdAt`, `ascending=true/false`, `closed=true/false`
+- Default sort: **Newest first** (`ascending=false`) to get recent markets
 - Returns: Market questions, outcomes, token IDs, volume, timestamps
+- **Pagination**: Uses offset to fetch beyond 500 markets (offset=0, 500, 1000, etc.)
 
 **CLOB API** (Live Data):
 - Base URL: `https://clob.polymarket.com`
@@ -139,14 +159,39 @@ Case-insensitive matching: Any market with these keywords in the question is cla
 
 ## Common Tasks
 
-### Find 1-Hour BTC/ETH Markets
+### Find Short-Term "Up or Down" Markets (15min, 1hr, 4hr)
 
 ```bash
-# Find all unresolved crypto markets
-uv run python crypto_market_finder.py --unresolved
+# Find all short-term crypto markets (Bitcoin, Ethereum, Solana, XRP)
+uv run python crypto_market_finder.py --unresolved --short-term
 
-# Look for markets with "Bitcoin Up or Down" or "Ethereum Up or Down" in output
-# Copy the token IDs (shown as "Tokens: UP=..., DOWN=...")
+# Find short-term markets from the last 7 days
+uv run python crypto_market_finder.py --unresolved --short-term --start-date 2025-12-15
+
+# Find high-volume short-term markets
+uv run python crypto_market_finder.py --unresolved --short-term --min-volume 50
+
+# Fetch more markets to find historical short-term markets
+uv run python crypto_market_finder.py --short-term --max-markets 10000
+```
+
+The `--short-term` filter looks for markets with patterns like:
+- "Up or Down" in the question
+- "updown" in the slug
+- "15m", "1h", "4h" in the slug
+- "15 min", "1 hour", "4 hour" in the question
+
+### Get Markets from a Specific Date Range
+
+```bash
+# Get all markets from November 2025
+uv run python crypto_market_finder.py --start-date 2025-11-01 --end-date 2025-12-01
+
+# Get markets from the last week
+uv run python crypto_market_finder.py --start-date 2025-12-15
+
+# Combine with other filters
+uv run python crypto_market_finder.py --unresolved --start-date 2025-12-20 --min-volume 100
 ```
 
 ### Monitor a Market with Live Updates
@@ -270,9 +315,37 @@ print(markets[0])  # Inspect structure
 
 ## Important Notes
 
+### Pagination and API Limits
+
+- **API Hard Limit**: Polymarket Gamma API returns maximum 500 markets per request
+- **Batch Size**: `MARKET_FETCH_BATCH_SIZE = 500` in `config.py`
+- **Default Fetch Limit**: 5000 markets (`DEFAULT_MAX_MARKETS` in `config.py`)
+- **Pagination**: Script automatically fetches multiple batches using offset (0, 500, 1000, 1500, etc.)
+- **Sort Order**: Default is **newest first** to get recent markets (use `--oldest-first` for reverse)
+- **Date Filtering**: Use `--start-date` and `--end-date` to efficiently stop pagination early
+
+**Why newest first?**
+- Most users want recent markets (hourly "Up or Down" markets, current events)
+- Fetching oldest first (from 2020) requires thousands of requests to reach 2025 markets
+- With newest first, you get today's markets in the first batch (500 markets)
+
+### Market Data
+
 - **Token IDs**: Always stored as strings (can be 70+ digits)
-- **Timestamps**: Market times in UTC
+- **Timestamps**: Market times in UTC (ISO 8601 format)
 - **Prices**: Decimal format (0.0 to 1.0 range typical)
 - **Volumes**: In USD
-- **Resolved Markets**: Have `closedTime` field populated
-- **Unresolved Markets**: `closedTime` is empty/null
+- **Resolved Markets**: Have `closed=true` and `closedTime` field populated
+- **Unresolved Markets**: Have `closed=false` and `closedTime` is empty
+
+### CSV Output
+
+The `data/crypto_markets_cache.csv` file contains:
+- `id`: Market ID
+- `question`: Market question text
+- `outcome1`, `outcome2`: Outcome labels (e.g., "Up", "Down" or "Yes", "No")
+- `token1`, `token2`: Token IDs for each outcome (use these for live monitoring)
+- `volume`: Total volume in USD
+- `closed`: Boolean (true/false) indicating if market is resolved
+- `closedTime`: Timestamp when market closed (empty for open markets)
+- `createdAt`: Timestamp when market was created
