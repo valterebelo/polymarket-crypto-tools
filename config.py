@@ -29,13 +29,13 @@ CRYPTO_KEYWORDS = [
 MARKET_FETCH_BATCH_SIZE = 500  # API hard limit is 500 per request
 MAX_DISPLAY_RESOLVED = 20
 MAX_DISPLAY_UNRESOLVED = 20
-DEFAULT_MAX_MARKETS = 5000  # Default max markets to fetch (prevents infinite loops)
+DEFAULT_MAX_MARKETS = 10000  # Default max markets to fetch (prevents infinite loops)
 
 # Live Monitor Settings
 DEFAULT_POLL_INTERVAL = 5  # seconds
 MIN_POLL_INTERVAL = 1
 MAX_POLL_INTERVAL = 60
-ORDERBOOK_DEPTH = 5  # Top N levels to display
+ORDERBOOK_DEPTH = 10  # Top N levels to display
 RECENT_TRADES_COUNT = 10
 
 # Data Paths

@@ -125,7 +125,9 @@ class MarketWebSocketClient:
             data = json.loads(message)
             event_type = data.get("event_type", "")
             
-            self._log(f"Received event: {event_type}")
+            # Don't log price_change events - too frequent
+            if event_type != "price_change":
+                self._log(f"Received event: {event_type}")
             
             if event_type == "book":
                 self._handle_book_event(data)

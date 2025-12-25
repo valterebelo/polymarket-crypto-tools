@@ -35,6 +35,16 @@ uv run python crypto_market_finder.py --unresolved --min-volume 1000
 uv run python crypto_market_finder.py --output my_markets.csv
 ```
 
+### 1b. Find Any Markets (interactive keyword filter)
+
+Run with a start date, then optionally add words to filter markets:
+
+```bash
+uv run python any_markets.py --start-date 2025-12-01 --unresolved
+```
+
+By default this caches to `data/any_markets_cache.csv`.
+
 **Example Output:**
 ```
 =================================================================

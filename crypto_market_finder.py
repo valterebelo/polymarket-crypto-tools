@@ -5,7 +5,6 @@ Crypto Market Finder for Polymarket
 Finds and displays crypto-related markets with filtering options.
 """
 import argparse
-import csv
 from typing import List, Dict
 from api_client import PolymarketAPIClient
 from config import (
@@ -13,100 +12,13 @@ from config import (
     MAX_DISPLAY_RESOLVED, MAX_DISPLAY_UNRESOLVED,
     CACHE_FILE, DEFAULT_MAX_MARKETS
 )
-
-
-def is_crypto_market(question: str, keywords: List[str]) -> bool:
-    """Check if a market question contains crypto keywords"""
-    question_lower = question.lower()
-    return any(keyword.lower() in question_lower for keyword in keywords)
-
-
-def fetch_all_markets(client: PolymarketAPIClient, closed: bool = None,
-                     max_markets: int = DEFAULT_MAX_MARKETS,
-                     start_date: str = None, end_date: str = None,
-                     newest_first: bool = True) -> List[Dict]:
-    """
-    Fetch markets with pagination and optional date filtering
-
-    Args:
-        client: API client
-        closed: Filter by closed status (None for all)
-        max_markets: Maximum number of markets to fetch
-        start_date: Only include markets created on or after this date (YYYY-MM-DD)
-        end_date: Only include markets created before this date (YYYY-MM-DD)
-        newest_first: Fetch newest markets first (default: True)
-    """
-    all_markets = []
-    offset = 0
-    batch_size = MARKET_FETCH_BATCH_SIZE
-
-    print(f"\nFetching markets from Polymarket...")
-    if start_date:
-        print(f"  Filtering markets created on or after: {start_date}")
-    if end_date:
-        print(f"  Filtering markets created before: {end_date}")
-
-    # Convert dates to ISO format for comparison if provided
-    from datetime import datetime
-    start_dt = datetime.fromisoformat(start_date) if start_date else None
-    end_dt = datetime.fromisoformat(end_date) if end_date else None
-
-    while len(all_markets) < max_markets:
-        print(f"  Fetching batch at offset {offset}...")
-        markets = client.get_markets(
-            limit=batch_size,
-            offset=offset,
-            closed=closed,
-            order="createdAt",
-            ascending=not newest_first  # Invert for API (ascending=True means oldest first)
-        )
-
-        if not markets:
-            break
-
-        # Apply date filtering if specified
-        filtered_markets = []
-        for market in markets:
-            created_at = market.get('createdAt', '')
-            if not created_at:
-                continue
-
-            market_dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-
-            # Check date bounds
-            if start_dt and market_dt < start_dt:
-                if newest_first:
-                    # We've gone past the start date, stop fetching
-                    print(f"  Reached markets before {start_date}, stopping...")
-                    return all_markets
-                else:
-                    # Skip this market, continue to next
-                    continue
-
-            if end_dt and market_dt >= end_dt:
-                if not newest_first:
-                    # We've gone past the end date, stop fetching
-                    print(f"  Reached markets after {end_date}, stopping...")
-                    return all_markets
-                else:
-                    # Skip this market, continue to next
-                    continue
-
-            filtered_markets.append(market)
-
-        all_markets.extend(filtered_markets)
-        offset += len(markets)
-
-        # Check if we've reached the end of available markets
-        if len(markets) < batch_size:
-            break  # Last page
-
-    if len(all_markets) >= max_markets:
-        print(f"  Reached maximum market limit ({max_markets})")
-        all_markets = all_markets[:max_markets]
-
-    print(f"✓ Fetched {len(all_markets)} total markets\n")
-    return all_markets
+from market_finder_common import (
+    fetch_all_markets,
+    separate_by_status,
+    format_market_display,
+    save_to_csv,
+    text_matches_any_keyword,
+)
 
 
 def filter_crypto_markets(markets: List[Dict]) -> List[Dict]:
@@ -115,140 +27,10 @@ def filter_crypto_markets(markets: List[Dict]) -> List[Dict]:
 
     for market in markets:
         question = market.get('question', '') or market.get('title', '')
-        if is_crypto_market(question, CRYPTO_KEYWORDS):
+        if text_matches_any_keyword(question, CRYPTO_KEYWORDS):
             crypto_markets.append(market)
 
     return crypto_markets
-
-
-def separate_by_status(markets: List[Dict]) -> tuple:
-    """Separate markets into resolved and unresolved"""
-    resolved = []
-    unresolved = []
-
-    for market in markets:
-        # Use 'closed' field if available, otherwise check closedTime
-        is_closed = market.get('closed', False)
-        if is_closed:
-            resolved.append(market)
-        else:
-            unresolved.append(market)
-
-    return resolved, unresolved
-
-
-def format_market_display(market: Dict, index: int, show_resolution: bool = False) -> str:
-    """Format a market for display"""
-    question = market.get('question', '') or market.get('title', '')
-    volume = float(market.get('volume', 0))
-    market_id = market.get('id', '')
-
-    # Get appropriate time field based on market status
-    is_closed = market.get('closed', False)
-    closed_time = market.get('closedTime', '')
-    end_date = market.get('endDate', '')
-
-    # Get token IDs
-    clob_tokens = market.get('clobTokenIds', '[]')
-    if isinstance(clob_tokens, str):
-        import json
-        try:
-            clob_tokens = json.loads(clob_tokens)
-        except:
-            clob_tokens = []
-
-    token1 = clob_tokens[0] if len(clob_tokens) > 0 else 'N/A'
-    token2 = clob_tokens[1] if len(clob_tokens) > 1 else 'N/A'
-
-    # Get outcomes
-    outcomes = market.get('outcomes', '[]')
-    if isinstance(outcomes, str):
-        import json
-        try:
-            outcomes = json.loads(outcomes)
-        except:
-            outcomes = []
-
-    outcome1 = outcomes[0] if len(outcomes) > 0 else 'YES'
-    outcome2 = outcomes[1] if len(outcomes) > 1 else 'NO'
-
-    # Build display string
-    lines = []
-    resolution = ""
-    if show_resolution and closed_time:
-        resolution = " (RESOLVED)"
-
-    lines.append(f"[{index}] {question}{resolution}")
-    lines.append(f"    Volume: ${volume:,.0f} | Market ID: {market_id[:10]}...")
-
-    if is_closed and closed_time:
-        lines.append(f"    Closed: {closed_time[:10]}")
-    elif end_date:
-        lines.append(f"    Expires: {end_date[:10]} | Status: OPEN")
-    else:
-        lines.append(f"    Status: OPEN")
-
-    # Show token IDs
-    if token1 != 'N/A' and token2 != 'N/A':
-        token1_short = token1[:10] + "..." if len(token1) > 10 else token1
-        token2_short = token2[:10] + "..." if len(token2) > 10 else token2
-        lines.append(f"    Tokens: {outcome1}={token1_short}, {outcome2}={token2_short}")
-
-    return "\n".join(lines)
-
-
-def save_to_csv(markets: List[Dict], filename: str):
-    """Save markets to CSV file"""
-    if not markets:
-        print(f"No markets to save to {filename}")
-        return
-
-    headers = ['id', 'question', 'outcome1', 'outcome2', 'token1', 'token2',
-               'volume', 'closed', 'closedTime', 'createdAt']
-
-    with open(filename, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=headers)
-        writer.writeheader()
-
-        for market in markets:
-            # Parse tokens
-            clob_tokens = market.get('clobTokenIds', '[]')
-            if isinstance(clob_tokens, str):
-                import json
-                try:
-                    clob_tokens = json.loads(clob_tokens)
-                except:
-                    clob_tokens = []
-
-            token1 = clob_tokens[0] if len(clob_tokens) > 0 else ''
-            token2 = clob_tokens[1] if len(clob_tokens) > 1 else ''
-
-            # Parse outcomes
-            outcomes = market.get('outcomes', '[]')
-            if isinstance(outcomes, str):
-                import json
-                try:
-                    outcomes = json.loads(outcomes)
-                except:
-                    outcomes = []
-
-            outcome1 = outcomes[0] if len(outcomes) > 0 else 'YES'
-            outcome2 = outcomes[1] if len(outcomes) > 1 else 'NO'
-
-            writer.writerow({
-                'id': market.get('id', ''),
-                'question': market.get('question', '') or market.get('title', ''),
-                'outcome1': outcome1,
-                'outcome2': outcome2,
-                'token1': token1,
-                'token2': token2,
-                'volume': market.get('volume', 0),
-                'closed': market.get('closed', False),
-                'closedTime': market.get('closedTime', ''),
-                'createdAt': market.get('createdAt', '')
-            })
-
-    print(f"✓ Saved {len(markets)} markets to {filename}")
 
 
 def main():
