@@ -12,7 +12,7 @@ from config import (
     MAX_DISPLAY_RESOLVED, MAX_DISPLAY_UNRESOLVED,
     CACHE_FILE, DEFAULT_MAX_MARKETS
 )
-from market_finder_common import (
+from any_market_finder import (
     fetch_all_markets,
     separate_by_status,
     format_market_display,

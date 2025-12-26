@@ -43,6 +43,15 @@ DATA_DIR = "data"
 ARCHIVE_DIR = "archive"
 CACHE_FILE = f"{DATA_DIR}/crypto_markets_cache.csv"
 
+# Tick Database Settings
+TICK_DB_PATH = f"{DATA_DIR}/ticks.db"
+TICK_BATCH_COMMIT_SIZE = 100  # Commit every N trades
+TICK_METADATA_REFRESH_INTERVAL = 300  # Refresh market metadata every 5min
+
+# Historical Fetch Settings
+MAX_HISTORICAL_FETCH_PER_TOKEN = 10000
+HISTORICAL_FETCH_BATCH_SIZE = 100  # Per API request
+
 # Terminal Display Settings
 USE_COLOR = True
 CLEAR_SCREEN = True

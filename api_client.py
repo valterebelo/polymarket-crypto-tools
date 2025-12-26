@@ -14,9 +14,16 @@ from config import (
 class PolymarketAPIClient:
     """API client for Polymarket with automatic rate limiting and retries"""
 
-    def __init__(self):
+    def __init__(self, auth_manager=None):
+        """
+        Initialize API client.
+
+        Args:
+            auth_manager: Optional AuthManager instance for authenticated requests
+        """
         self.session = requests.Session()
         self.last_request_time = 0
+        self.auth_manager = auth_manager
 
     def _rate_limit(self):
         """Enforce rate limiting between requests"""
@@ -25,13 +32,28 @@ class PolymarketAPIClient:
             time.sleep(RATE_LIMIT_DELAY - elapsed)
         self.last_request_time = time.time()
 
-    def _request_with_retry(self, url: str, params: Dict = None) -> Optional[Dict]:
-        """Make HTTP request with retry logic"""
+    def _request_with_retry(self, url: str, params: Dict = None, headers: Dict = None) -> Optional[Dict]:
+        """
+        Make HTTP request with retry logic.
+
+        Args:
+            url: Request URL
+            params: Query parameters
+            headers: HTTP headers (for authentication)
+
+        Returns:
+            Response JSON or None if failed
+        """
         self._rate_limit()
 
         for attempt in range(MAX_RETRIES):
             try:
-                response = self.session.get(url, params=params, timeout=TIMEOUT_SECONDS)
+                response = self.session.get(
+                    url,
+                    params=params,
+                    headers=headers,
+                    timeout=TIMEOUT_SECONDS
+                )
 
                 if response.status_code == 200:
                     return response.json()
@@ -164,7 +186,12 @@ class PolymarketAPIClient:
 
     def get_trades(self, token_id: str, limit: int = 100) -> List[Dict]:
         """
-        Get recent trades for a token
+        Get recent trades for a token.
+
+        Note: This endpoint requires authentication. Returns empty list if:
+        - No auth credentials configured
+        - Authentication fails (401)
+        - No trades available
 
         Args:
             token_id: Token ID to fetch trades for
@@ -176,5 +203,15 @@ class PolymarketAPIClient:
         url = f"{CLOB_API_BASE}/trades"
         params = {"token_id": token_id, "limit": limit}
 
-        data = self._request_with_retry(url, params)
+        # Add authentication headers if available
+        headers = None
+        if self.auth_manager and self.auth_manager.has_credentials():
+            try:
+                # Build request path with query params for signature
+                request_path = f"/trades?token_id={token_id}&limit={limit}"
+                headers = self.auth_manager.get_auth_headers("GET", request_path)
+            except Exception as e:
+                print(f"Warning: Failed to generate auth headers: {e}")
+
+        data = self._request_with_retry(url, params, headers=headers)
         return data if isinstance(data, list) else []

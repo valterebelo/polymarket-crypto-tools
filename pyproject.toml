@@ -7,8 +7,10 @@ requires-python = ">=3.13"
 dependencies = [
     "requests>=2.31.0",
     "pandas>=2.2.0",
+    "matplotlib>=3.8.0",
 ]
 
 [project.scripts]
 market-finder = "crypto_market_finder:main"
 live-monitor = "live_monitor:main"
+tick-tool = "tick_tool:main"

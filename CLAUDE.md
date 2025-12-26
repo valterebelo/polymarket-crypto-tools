@@ -141,6 +141,35 @@ uv run python live_monitor.py --token-up <ID1> --token-down <ID2> --market-name 
 
 **Important**: CLOB order book and trades endpoints may not be publicly accessible. The live monitor gracefully degrades to display prices only if these endpoints are unavailable.
 
+**API Testing Results (December 2025)**:
+- `/trades` endpoint **requires API authentication** (401 Unauthorized without API key)
+- Historical trade data is NOT publicly accessible via REST API
+- **WebSocket is the only public data source** for tick data collection
+- WebSocket provides real-time trade stream without authentication
+
+### WebSocket API (Real-Time Data - No Auth Required)
+
+**Base URL**: `wss://ws-subscriptions-clob.polymarket.com/ws/market`
+
+**Event Types Received**:
+- `book` - Orderbook snapshots (on subscribe and after trades)
+- `price_change` - When orders are placed/cancelled
+- `tick_size_change` - When tick size changes
+- `last_trade_price` - **Trade executions** (tick data source)
+
+**Trade Event Structure**:
+```python
+{
+    "asset_id": token_id,        # Token ID (70+ digits)
+    "price": price,              # Trade price (0.0-1.0 range)
+    "size": size,                # Trade size/volume
+    "side": "BUY" or "SELL",     # Trade direction
+    "fee_rate_bps": fee_rate,    # Fee in basis points
+    "timestamp": ISO_timestamp,   # ISO 8601 format
+    "market": market_id          # Market ID
+}
+```
+
 ### Crypto Market Filtering
 
 Markets are filtered using keyword matching on the question text:
@@ -349,3 +378,266 @@ The `data/crypto_markets_cache.csv` file contains:
 - `closed`: Boolean (true/false) indicating if market is resolved
 - `closedTime`: Timestamp when market closed (empty for open markets)
 - `createdAt`: Timestamp when market was created
+
+---
+
+## Tick Data System (NEW)
+
+The tick data system records individual trade executions to a SQLite database for historical analysis and candlestick generation.
+
+### Overview
+
+**Purpose**: Collect tick-by-tick trade data for backtesting and analysis
+
+**Data Source**: WebSocket API only (REST `/trades` endpoint requires authentication)
+
+**Storage**: SQLite database at `data/ticks.db`
+
+**Key Insight**: Since historical trade data is NOT publicly accessible via REST API, you must start recording NOW to build a historical database for future analysis.
+
+### Quick Start
+
+```bash
+# Record trades for specific markets (use market IDs from crypto_market_finder.py)
+uv run tick-tool record --market-ids 996577,996578,996579
+
+# Record all unresolved crypto markets from cache
+uv run tick-tool record --from-cache --filter-unresolved --min-volume 100
+
+# Query trades for a market
+uv run tick-tool query --market-id 996577
+
+# Export to CSV
+uv run tick-tool export --market-id 996577 --output trades.csv
+
+# Show market summary
+uv run tick-tool summary --market-id 996577
+
+# List all markets in database
+uv run tick-tool list
+```
+
+### Architecture
+
+```
+WebSocket (wss://ws-subscriptions-clob.polymarket.com)
+    ↓ (trade events: price, size, side, timestamp)
+tick_recorder.py
+    ↓ (enriched with market_id, outcome)
+tick_database.py (SQLite)
+    ↓ (queries, exports)
+tick_tool.py (CLI)
+```
+
+### Database Schema
+
+**markets table**: Market metadata cache
+- `market_id`: Market ID (primary key)
+- `question`: Market question text
+- `outcome_up`, `outcome_down`: Outcome labels
+- `token_up`, `token_down`: Token IDs
+- `created_at`, `closed`, `closed_time`: Market status
+
+**trades table**: Individual trade records
+- `trade_id`: Unique composite ID (prevents duplicates)
+- `market_id`: Market ID (foreign key)
+- `asset_id`: Token ID (70+ digits)
+- `side`: "BUY" or "SELL"
+- `outcome`: "UP", "DOWN", etc. (enriched by recorder)
+- `price`: Trade price (0.0-1.0 range)
+- `size`: Trade size/volume
+- `fee_rate_bps`: Fee rate in basis points
+- `timestamp`: ISO 8601 timestamp
+- `source`: "websocket" (always, since REST requires auth)
+- `recorded_at`: When we stored this trade
+
+**Indices**: Optimized for queries by market_id, asset_id, and timestamp
+
+### CLI Commands
+
+#### record - Start Recording
+
+```bash
+# Record specific markets
+uv run tick-tool record --market-ids 996577,996578
+
+# Auto-discover from cache with filters
+uv run tick-tool record --from-cache --filter-unresolved --min-volume 1000 --limit 10
+
+# Read market IDs from file
+uv run tick-tool record --markets-file my_markets.txt
+
+# Custom database path
+uv run tick-tool record --market-ids 996577 --db-path /path/to/ticks.db
+```
+
+**Options**:
+- `--market-ids`: Comma-separated market IDs
+- `--from-cache`: Auto-discover from `crypto_markets_cache.csv`
+- `--filter-unresolved`: Only unresolved markets (with `--from-cache`)
+- `--min-volume`: Minimum volume filter (with `--from-cache`)
+- `--limit`: Limit number of markets to record
+- `--markets-file`: Read market IDs from file (one per line)
+
+**Behavior**:
+- Fetches market metadata from Gamma API
+- Subscribes to WebSocket for all tokens across markets
+- Records trades continuously until Ctrl+C
+- Auto-reconnects on disconnect
+- Shows periodic status updates
+
+#### query - Query Trades
+
+```bash
+# Query by market ID
+uv run tick-tool query --market-id 996577
+
+# Query by token ID
+uv run tick-tool query --token-id 96335067832619596263476394965563507657401324223032703267023353422994551721776
+
+# Date range filtering
+uv run tick-tool query --market-id 996577 --start-time 2025-12-23T20:00:00 --end-time 2025-12-23T21:00:00
+
+# Filter by outcome
+uv run tick-tool query --market-id 996577 --outcome UP
+
+# Export to CSV
+uv run tick-tool query --market-id 996577 --output trades.csv
+```
+
+**Output**: Displays trades in terminal or exports to CSV
+
+#### export - Export to CSV
+
+```bash
+# Export all trades for a market
+uv run tick-tool export --market-id 996577 --output btc_trades.csv
+```
+
+**CSV Format**:
+```
+timestamp,market_id,asset_id,side,outcome,price,size,value,fee_rate_bps,source
+2025-12-23T20:15:30Z,996577,96335067...,BUY,UP,0.5234,100.50,52.63,10,websocket
+```
+
+#### list - List Markets
+
+```bash
+# List all markets
+uv run tick-tool list
+
+# Filter by status
+uv run tick-tool list --filter-closed --closed true
+```
+
+#### summary - Market Summary
+
+```bash
+# Show summary statistics
+uv run tick-tool summary --market-id 996577
+```
+
+**Output**:
+- Market metadata (question, outcomes, status)
+- Total trades count
+- Total volume
+- Time range (oldest/newest trade)
+- Data sources breakdown
+
+### Integration with Market Finder
+
+**Workflow**: Find markets → Record trades → Analyze
+
+```bash
+# Step 1: Find interesting markets
+uv run market-finder --unresolved --min-volume 1000
+
+# Step 2: Start recording (output goes to crypto_markets_cache.csv)
+uv run tick-tool record --from-cache --filter-unresolved --min-volume 1000
+
+# Step 3: Let it run for hours/days to build historical data
+
+# Step 4: Query and analyze
+uv run tick-tool query --market-id 996577 --output analysis.csv
+```
+
+### Data Completeness
+
+**What You Get**:
+- ✓ All trades from the moment you start recording
+- ✓ Real-time data with sub-second latency
+- ✓ Complete trade history going forward
+
+**What You DON'T Get**:
+- ✗ Historical trades from before you started recording
+- ✗ Trades from resolved markets (unless you recorded them live)
+- ✗ Backfilled data (REST API requires authentication)
+
+**Recommendation**: Start recording NOW for markets you're interested in to build up historical data over time.
+
+### Files
+
+**New Files**:
+- `tick_database.py` (~480 lines) - SQLite database layer
+- `tick_recorder.py` (~280 lines) - WebSocket recorder
+- `tick_tool.py` (~330 lines) - CLI interface
+- `test_trades_api.py` (~220 lines) - API testing script
+
+**Data Files**:
+- `data/ticks.db` - SQLite database (created on first use)
+- Exported CSVs go to current directory or specified path
+
+### Configuration
+
+In `config.py`:
+
+```python
+# Tick Database Settings
+TICK_DB_PATH = "data/ticks.db"
+TICK_BATCH_COMMIT_SIZE = 100  # Commit every N trades
+TICK_METADATA_REFRESH_INTERVAL = 300  # Refresh market metadata every 5min
+
+# Historical Fetch Settings (not used - REST API requires auth)
+MAX_HISTORICAL_FETCH_PER_TOKEN = 10000
+HISTORICAL_FETCH_BATCH_SIZE = 100
+```
+
+### Troubleshooting
+
+**"Error: Market X not found"**
+- Check market ID is correct
+- Market may have been delisted
+- Try fetching fresh markets with `market-finder`
+
+**"No trades recorded"**
+- Check if market is active (has recent trading activity)
+- Verify WebSocket connection (look for connection messages)
+- Try with a different, more active market
+
+**"Database locked"**
+- Another process may be using the database
+- Close other tick-tool instances
+- SQLite allows concurrent reads but only one writer
+
+**WebSocket disconnects**
+- Auto-reconnect is built-in
+- Check internet connection
+- If persistent, check Polymarket WebSocket status
+
+### Future Enhancements
+
+Possible additions for later:
+- Candlestick aggregation (1m, 5m, 15m, 1h, 4h, 1d)
+- Order book snapshot recording
+- Market-wide statistics
+- Real-time dashboard/visualization
+- Export to Parquet for analysis in pandas/polars
+- Integration with trading strategies
+
+### API Testing Notes
+
+From `test_trades_api.py` findings (December 2025):
+- `/trades` endpoint returns 401 Unauthorized without API key
+- Historical data NOT publicly accessible via REST API
+- WebSocket is the ONLY public source for tick data
+- Must record in real-time; cannot backfill historical data
